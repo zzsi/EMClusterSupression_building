@@ -1,0 +1,7 @@
+Learning an overcomplete visual dictionary from input images.
+
+Algorithm: EM Clustering with Local inhibition in the E step.
+Data: three building images
+
+It contains a detection module. Check out encode.m.
+
