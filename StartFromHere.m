@@ -10,7 +10,7 @@ mex mexc_SharedSketch.cpp	% learning by shared sketch algorithm (with data weigh
 mex mexc_ComputeMAX2.cpp
 mex mexc_ComputeMAX2MP.cpp
 mex mexc_TemplateAffineTransform.cpp
-mex mexc_CropInstanceNew.cpp
+mex mexc_CropInstance.cpp
 
 %% preparation
 
@@ -22,7 +22,6 @@ load(storeExponentialModelName);
 storedlambda = single(storedlambda);
 storedExpectation = single(storedExpectation);
 storedLogZ = single(storedLogZ);
-
 
 Correlation = CorrFilter(allFilter, epsilon);  % correlation between filters 
 for j = 1:numel(Correlation)
@@ -124,17 +123,22 @@ for iRS = 1:numRandomStart
                 end
                 % use mex-C code instead: crop S1 map
                 tScale = 0; destHeight = templateSize(1); destWidth = templateSize(2); nScale = 1; reflection = 1;
-                SUM1mapLearn(iMember,:) = mexc_CropInstanceNew( SUM1map,...
+                SUM1mapLearn(iMember,:) = mexc_CropInstance( SUM1map,...
                     activations(1,ind(iMember))-1,...
                     activations(2,ind(iMember))-1,...
-                    rotationRange(activatedTransform(ind(iMember))),tScale,reflection,destWidth,destHeight,numOrient,nScale );
+                    rotationRange(activatedTransform(ind(iMember))),tScale,reflection,...
+                    outRow{activatedTransform(ind(iMember))},outCol{activatedTransform(ind(iMember))},...
+                    numOrient,nScale,destWidth,destHeight );
 
                 % Crop detected image patch for visualization
                 srcIm = J{1};
-                cropped(iMember) = mexc_CropInstanceNew( {single(srcIm)},...
+                tmpNumOrient = 1;
+                cropped(iMember) = mexc_CropInstance( {single(srcIm)},...
                     activations(1,ind(iMember))-1,...
                     activations(2,ind(iMember))-1,...
-                    rotationRange(activatedTransform(ind(iMember))),0,reflection,destWidth,destHeight,1,1 );
+                    rotationRange(activatedTransform(ind(iMember))),tScale,reflection,...
+                    outRow{activatedTransform(ind(iMember))},outCol{activatedTransform(ind(iMember))},...
+                    tmpNumOrient,nScale,destWidth,destHeight );
 
                 % local max
                 subsampleM1 = 1;
@@ -306,6 +310,7 @@ activatedCluster = ceil( ( activations(3,:) + 1 ) / nTransform ); % starts from 
 activatedTransform = activations(3,:) + 1 - (activatedCluster-1) * nTransform; % starts from 1
 mixing = bestMixing;
 aveLogL = bestAveLogL;
+cluster_is_nonempty = zeros(numCluster,1);
 for cc = 1:numCluster
 	ind = find(activatedCluster == cc);
 	% sample a subset of training postitives, if necessary
@@ -328,25 +333,32 @@ for cc = 1:numCluster
         tScale = 0; destHeight = templateSize(1); destWidth = templateSize(2); nScale = 1; reflection = 1;
 		% Crop detected image patch for visualization
 		srcIm = J{1};
-		cropped(iMember) = mexc_CropInstanceNew( {single(srcIm)},...
+		tmpNumOrient = 1;
+        cropped(iMember) = mexc_CropInstance( {single(srcIm)},...
             activations(1,ind(iMember))-1,...
             activations(2,ind(iMember))-1,...
-            rotationRange(activatedTransform(ind(iMember))),0,reflection,destWidth,destHeight,1,1 );		
-	end
-	im = displayImages(cropped,10,templateSize(1),templateSize(2));
-	if ~isempty(im)
-		imwrite(im,sprintf('output/cluster%d.png',cc));
+            rotationRange(activatedTransform(ind(iMember))),tScale,reflection,...
+            outRow{activatedTransform(ind(iMember))},outCol{activatedTransform(ind(iMember))},...
+            tmpNumOrient,nScale,destWidth,destHeight );		
 	end
 	
-	syms{cc} = -single(S2Templates{cc}.commonTemplate);
+	if ~isempty(ind) % cluster is not empty
+		im = displayImages(cropped,10,templateSize(1),templateSize(2));
+		imwrite(im,sprintf('output/cluster%d.png',cc));
+		cluster_is_nonempty(cc) = 1;
+		syms{cc} = -single(S2Templates{cc}.commonTemplate);
+	end
 end
-towrite = displayImages(syms,10,templateSize(1),templateSize(2));
+towrite = displayImages(syms(find(cluster_is_nonempty)),10,templateSize(1),templateSize(2));
 imwrite(towrite,sprintf('output/template.png'));
 save(sprintf('learning_result.mat'),'bestActivations','bestS2Templates','bestOverallScore','bestInitialClusters','bestAveLogL','bestMixing');
 
 % rank the learned templates
+nonempty_clusters = find(cluster_is_nonempty);
+mixing = mixing(nonempty_clusters);
+aveLogL = aveLogL(nonempty_clusters);
 [sorted idx] = sort( sqrt(mixing) .* aveLogL, 'descend' );
-for i = 1:numel(syms)
+for i = 1:numel(syms(nonempty_clusters))
     towrite = syms{i};
     if range(towrite) < 1
         towrite = 255;

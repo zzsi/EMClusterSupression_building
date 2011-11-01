@@ -2,15 +2,11 @@
  * Crops a patch on image or feature map. The patch can be 4-dimensional (width, height, orientation, scale). 
  *
  * Usage:
- *    dest = c_CropInstance(src,rShift,cShift,rotation,tScale,outRow,outCol,destWidth,destHeight,nOri,nScale);
+ *    dest = mexc_CropInstance(src,rowshift,colshift,rotation,scaling,reflection,transformedRow,transformedCol,nOri,nScale,destWidth,destHeight);
  *
- *      When cropping a colored image, set nOri = 3, nScale = 1, rotation = 0, tScale = 0.
+ *      When cropping a gray-level image, set nOri = 1, nScale = 1.
+ *		reflection = 1: no reflection; -1: reflected horizontally.
  *
- * [indTransformation] is the index for template transformation. It indexes an affine transformation.  
- *
- * Note: In the matlab implementation of the same function, all locations x orientations x scales are stored. 
- * Instead in this C-implementation, to save memory, we only store transformed locations. Orientation/scale
- * are computed on the fly.
  *
  */
 # include <stdio.h>
@@ -24,13 +20,12 @@
 # define MIN(x, y) ((x)<(y)? (x):(y))
 # define ROUND(x) (floor((x)+.5))
 
-float **src, **dest;        /* source and destination images or feature maps */
+float **src, **dest;       /* source and destination images or feature maps */
 int nPixel;               /* number of pixels in destination image patch */
 int destWidth, destHeight;
 int srcWidth, srcHeight;
-float *outRow, *outCol;     /* The two vectors represent transformed locations on source feature maps. */
-float rotation, tScale;
-float rShift, cShift;
+const float* transformedRow, *transformedCol; /* A list of 2D points. It is the transformed rectangular lattice. */
+float rshift, cshift, rotation, scaling, reflection;  /* rigid geometric transformation of the template */
 /* The following two parameters are of the destination map. Source feature map may have a different number of scales.  */
 int nOri;                   /* number of quantized levels of orientation within 0~PI */
 int nScale;                 /* number of feature scales */
@@ -38,18 +33,18 @@ int nScale;                 /* number of feature scales */
 void crop(int indDest,int indSrc)
 {
     int i, r, c;
-    /* Reminder: [outRow], [outCol] should be a collection of transformed 2D points that are
-     * transformed from traversed points with row index as inner index.
-     */
     for( i = 0; i < nPixel; ++i ) /* location */
     {
-        r = outRow[i] + rShift;
-        c = outCol[i] + cShift;
+    	r = rshift + (int)transformedRow[i];
+    	c = cshift + (int)transformedCol[i];
         if( r < 0 || r >= srcHeight || c < 0 || c >= srcWidth )
         {
-            continue;
+            /* do nothing */
         }
-        dest[indDest][i] = src[indSrc][c*srcHeight+r];
+        else
+        {
+            dest[indDest][i] = src[indSrc][c*srcHeight+r];
+        }
     }
 }
 
@@ -58,13 +53,7 @@ void compute()
     int i, s, o; /* destination image: scale, orientation */
     int srcS, srcO; /* src image: scale, orientation */
     int indSrc, indDest;
-
-    if( nPixel != destHeight * destWidth )
-    {
-        mexPrintf("nPixel = %d, destHeight = %d, destWidth = %d \n", nPixel, destHeight, destWidth);
-        mexErrMsgTxt("nPixel != destHeight * destWidth  !!!!!!");
-    }
-
+	
     for( s = 0; s < nScale; ++s )
     {
          for( o = 0; o < nOri; ++o )
@@ -80,18 +69,30 @@ void compute()
     
     /* The following two FOR loops go over destimation images/feature maps
      * at different scales and orientations.
-     */
-    
+     */	
     for( s = 0; s < nScale; ++s )
     {
-        srcS = s + tScale;
+        srcS = s + scaling;
         if( srcS < 0 || srcS >= nScale )
         {
             continue;
         }
+
         for( o = 0; o < nOri; ++o )
         {
             srcO = o + rotation;
+            while( srcO < 0 )
+            {
+                srcO += nOri;
+            }
+            while( srcO >= nOri )
+            {
+                srcO -= nOri;
+            }
+            if( reflection < 0 ) // deal with reflection
+            {
+                 srcO = nOri - srcO;
+            }
             while( srcO < 0 )
             {
                 srcO += nOri;
@@ -113,22 +114,23 @@ void mexFunction(int nlhs, mxArray *plhs[],
                  int nrhs, const mxArray *prhs[])   
 {
     const mxArray *pA;
-	mxArray *pA2;
+    mxArray *pA2;
     mwSize dimsOutput[2];
     void* start_of_pr;
     mxClassID datatype;
     int nMap, i, bytes_to_copy;
+	
     /* =============================================
      * Handle input variables.
      * ============================================= 
      */
     /*
-	 * input variable 0: src. A list of images or 2D feature maps.
-	 */
+     * input variable 0: src. A list of images or 2D feature maps.
+     */
     pA = prhs[0];
     nMap = mxGetM(pA) * mxGetN(pA);
     src = (float**)mxCalloc(nMap, sizeof(*src));
-	for( i = 0; i < nMap; ++i )
+    for( i = 0; i < nMap; ++i )
     {
         srcHeight = mxGetM( mxGetCell(pA,i) );
         srcWidth = mxGetN( mxGetCell(pA,i) );
@@ -136,65 +138,63 @@ void mexFunction(int nlhs, mxArray *plhs[],
         datatype = mxGetClassID( mxGetCell(pA,i) );
         if( datatype != mxSINGLE_CLASS )
         {
-            mexErrMsgTxt("warning !! single precision required.");
+            mexErrMsgTxt("warning !! single precision required. src");
         }
     }
+	
+    /*
+     * input variable 1: row shift
+     */
+    rshift = (float)mxGetScalar(prhs[1]);
+    /*
+     * input variable 2: col shift
+     */
+    cshift = (float)mxGetScalar(prhs[2]);
+    /*
+     * input variable 3: rotation
+     */
+    rotation = (float)mxGetScalar(prhs[3]);
+    /*
+     * input variable 4: scaling
+     */
+    scaling = (float)mxGetScalar(prhs[4]);
+    /*
+     * input variable 5: (horizontal) reflection
+     */
+    reflection = (float)mxGetScalar(prhs[5]);
+	
+    /*
+     * input variable 6: transformedRow
+     */
+	transformedRow = (const float*)mxGetPr(prhs[6]);
+	
+	/*
+     * input variable 7: transformedCol
+     */
+    transformedCol = (const float*)mxGetPr(prhs[7]);
+	
+    /*
+     * input variable 8: nOri (number of orientation levels within 0 ~ pi)
+     *        This is a parameter of the destimation map.
+     */
+    nOri = (int)mxGetScalar(prhs[8]);
     
     /*
-	 * input variable 1: rShift
-	 */
-	rShift = (float)mxGetScalar(prhs[1]);
-    /*
-	 * input variable 2: cShift
-	 */
-	cShift = (float)mxGetScalar(prhs[2]);
-    /*
-	 * input variable 3: rotation
-	 */
-	rotation = (float)mxGetScalar(prhs[3]);
-    /*
-	 * input variable 4: tScale
-	 */
-	tScale = (float)mxGetScalar(prhs[4]);
+     * input variable 9: nScale
+     *   This is a parameter of the destimation map.
+     */
+    nScale = (float)mxGetScalar(prhs[9]);
     
     /*
-	 * input variable 5: outRow
-	 */
-	outRow = (float*)mxGetPr(prhs[5]);
-    nPixel = mxGetM(prhs[5]) * mxGetN(prhs[5]);
-    datatype = mxGetClassID(prhs[5]);
-    if (datatype != mxSINGLE_CLASS)
-    {
-        mexErrMsgTxt("warning !! single precision required.");
-    }
-    /*
-	 * input variable 6: outCol
-	 */
-	outCol = (float*)mxGetPr(prhs[6]);
-    datatype = mxGetClassID(prhs[6]);
-    if (datatype != mxSINGLE_CLASS)
-    {
-        mexErrMsgTxt("warning !! single precision required.");
-    }
-    /*
-	 * input variable 7: destWidth
-	 */
-	destWidth = (int)mxGetScalar(prhs[7]);
-    /*
-	 * input variable 8: destHeight
-	 */
-	destHeight = (int)mxGetScalar(prhs[8]);
-    /*
-	 * input variable 9: nOri (number of orientation levels within 0 ~ pi) 
-     *                   This is a parameter of the destimation map.
-	 */
-	nOri = (int)mxGetScalar(prhs[9]);
+     * input variable 10: destHeight
+     */
+    destHeight = (int)mxGetScalar(prhs[10]);
     
     /*
-	 * input variable 10: nScale
-     *                  This is a parameter of the destimation map.
-	 */
-	nScale = (float)mxGetScalar(prhs[10]);
+     * input variable 11: destWidth
+     */
+    destWidth = (int)mxGetScalar(prhs[11]);
+    nPixel = destWidth * destHeight;
     
     /* =============================================
      * Computation.
@@ -205,7 +205,6 @@ void mexFunction(int nlhs, mxArray *plhs[],
     {
         dest[i] = (float*)mxCalloc( nPixel, sizeof(**dest) );
     }
-    
     
     compute();
     
@@ -218,7 +217,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
      * output variable 0: dest
      */
     dimsOutput[0] = nOri; dimsOutput[1] = nScale;
-	plhs[0] = mxCreateCellArray( 2, dimsOutput );
+    plhs[0] = mxCreateCellArray( 2, dimsOutput );
     dimsOutput[0] = destHeight; dimsOutput[1] = destWidth;
     for( i = 0; i < nOri*nScale; ++i )
     {

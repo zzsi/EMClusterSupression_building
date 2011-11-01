@@ -7,7 +7,6 @@ load(storeExponentialModelName);
 load partLocConfig
 
 load activations
-selected_img = [1:5];
 destFolder = '.';
 showPartBoundingBox = true;
 partSizeX = templateSize(1);

@@ -92,9 +92,37 @@ for templateScaleInd = 0:0 % large scale change
 end
 nTransform = count;
 
+% prepare morph-back mappings for geometric transforms
+largestPartSizeX = templateSize(1); largestPartSizeY = templateSize(2);
+denseX = -floor(largestPartSizeX/2) + (1:largestPartSizeX);
+denseY = -floor(largestPartSizeY/2) + (1:largestPartSizeY);
+count = 0;
+inRow = zeros(length(denseX)*length(denseY),1,'single');
+inCol = zeros(length(denseX)*length(denseY),1,'single');
+inO = zeros(numel(inRow),1,'single'); 
+inS = zeros(numel(inRow),1,'single');
+for y = denseY
+    for x = denseX
+        count = count+1;
+        inRow(count) = x;
+        inCol(count) = y;
+    end
+end
+outRow = cell(nTransform,1);
+outCol = cell(nTransform,1);
+for iT = 1:nTransform
+	tScale = templateTransform{iT}(1); 
+	rScale = templateTransform{iT}(2);
+	cScale = templateTransform{iT}(3);
+	[outRow{iT}, outCol{iT}] = ...
+		mexc_TemplateAffineTransform(tScale,rScale,cScale,...
+		    templateTransform{iT}(4),inRow,inCol,inO,inS,numOrient);
+end
+
 save('partLocConfig.mat','templateSize',...
     'category','numOrient','localOrNot','subsample','saturation','locationShiftLimit','orientShiftLimit',...
     'numElement','thresholdFactor','doubleOrNot', 'numCluster', 'numIter', 'subsampleS2', 'locationPerturbationFraction',...
-    'partSize','rotationRange','nTransform','templateTransform','S1softthres','subsampleM1','localHalfx','localHalfy');
+    'partSize','rotationRange','nTransform','templateTransform','S1softthres','subsampleM1','localHalfx','localHalfy',...
+    'inRow', 'inCol', 'outRow', 'outCol', 'largestPartSizeX', 'largestPartSizeY');
 clear Ioriginal
 
