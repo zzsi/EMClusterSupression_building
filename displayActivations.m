@@ -7,7 +7,6 @@ load(storeExponentialModelName);
 load partLocConfig
 
 load activations
-destFolder = '.';
 showPartBoundingBox = true;
 partSizeX = templateSize(1);
 partSizeY = templateSize(2);
