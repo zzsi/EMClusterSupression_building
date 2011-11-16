@@ -153,10 +153,15 @@ for iRS = 1:numRandomStart
                 imwrite(im,sprintf('output/cluter%d_iter%d.png',cc,iter));
             else
                 syms{cc} = zeros(templateSize,'single');
-                selectedLogZ(:) = 1;
-                save(sprintf('working/learnedmodel%d_iter%d.mat',cc,iter), 'numElement', 'selectedOrient',...
-		            'selectedx', 'selectedy', 'selectedlambda', 'selectedLogZ',...
-		            'commonTemplate');
+                if iter>1
+                	copyfile(sprintf('working/learnedmodel%d_iter%d.mat',cc,iter-1),sprintf('working/learnedmodel%d_iter%d.mat',cc,iter));
+                else
+                	selectedLogZ(:) = 1;
+		            save(sprintf('working/learnedmodel%d_iter%d.mat',cc,iter), 'numElement', 'selectedOrient',...
+				        'selectedx', 'selectedy', 'selectedlambda', 'selectedLogZ',...
+				        'commonTemplate');
+                end
+                
                 continue;
             end
 
