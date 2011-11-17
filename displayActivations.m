@@ -61,24 +61,30 @@ for img = selected_img
 	load(SUM1MAX1mapName, 'SUM1map', 'MAX1map', 'ARGMAX1map', 'M1RowShift', 'M1ColShift',...
 		'M1OriShifted', 'J');
 	% find activations
-	ind = find( activations(5,:) == img );
-	% initialize the mask of bounding boxes
-	matchedBoundingBox = zeros([size(J{1}),3]);
-	% track Gabor elements of activated templates
-	gaborXX = [];
-    gaborYY = [];
-    gaborOO = [];
-    gaborMM = [];
+	ind = find( activations(1,:) == img );
+	
+	% initialize the mask of bounding boxes and sketched image
+	matchedBoundingBox = zeros([size(J{end}),3]); % the bounding box map is of the highest resolution
+	matchedSym = zeros(size(J{end})); % the sketched image is of the highest resolution
+	
     % Gabor basis elements locations
-    for t = ind % for each activated template (or part)
-    	iCluster = ceil( ( activations(3,t) + 1 ) / nTransform );
-    	iTransform = activations(3,t) + 1 - (iCluster-1) * nTransform;
+    for t = ind % for each activated template (or codeword, or part)
+	
+		% track Gabor elements of activated templates for this template only
+		gaborXX = [];
+		gaborYY = [];
+		gaborOO = [];
+		gaborMM = [];
+	
+    	iCluster = ceil( ( activations(5,t) + 1 ) / nTransform );
+    	iTransform = activations(5,t) + 1 - (iCluster-1) * nTransform;
+		iRes = activations(4,t) + 1;
     	for j = 1:numElement
-		    gaborX = floor(activations(1,t) + TransformedTemplate{iTransform,iCluster}.selectedRow(j));
-		    gaborY = floor(activations(2,t) + TransformedTemplate{iTransform,iCluster}.selectedCol(j));
+		    gaborX = floor(activations(2,t) + TransformedTemplate{iTransform,iCluster}.selectedRow(j));
+		    gaborY = floor(activations(3,t) + TransformedTemplate{iTransform,iCluster}.selectedCol(j));
 		    gaborO = TransformedTemplate{iTransform,iCluster}.selectedOri(j);
-		    if gaborX > 0 && gaborX <= size(MAX1map{1},1) && gaborY > 0 && gaborY <= size(MAX1map{1},2)
-		        trace = ARGMAX1map{gaborO+1}(gaborX,gaborY) + 1;
+		    if gaborX > 0 && gaborX <= size(MAX1map{iRes,1},1) && gaborY > 0 && gaborY <= size(MAX1map{iRes,1},2)
+		        trace = ARGMAX1map{iRes,gaborO+1}(gaborX,gaborY) + 1;
 		        dx = M1RowShift{gaborO+1}(trace);
 		        dy = M1ColShift{gaborO+1}(trace);
 		        shiftedo = M1OriShifted{gaborO+1}(trace);
@@ -89,26 +95,37 @@ for img = selected_img
 		    gaborXX = [gaborXX;gaborX];
 		    gaborYY = [gaborYY;gaborY];
 		    gaborOO = [gaborOO;gaborO];
-		    if gaborX > 0 && gaborX <= size(MAX1map{1},1) && gaborY > 0 && gaborY <= size(MAX1map{1},2)
-		        val = SUM1map{gaborO+1}(gaborX,gaborY);
+		    if gaborX > 0 && gaborX <= size(MAX1map{iRes,1},1) && gaborY > 0 && gaborY <= size(MAX1map{iRes,1},2)
+		        val = SUM1map{iRes,gaborO+1}(gaborX,gaborY);
 		    else
 		        val = 0;
 		    end
 		    gaborMM = [gaborMM; max(0,sqrt(val)-.2)];
         end
+		
+		% render the sketches for this activated template
+		tmpMatchedSym = displayMatchedTemplate([size(J{iRes},1) size(J{iRes},2)],gaborXX,...
+			gaborYY,gaborOO,zeros(length(gaborXX),1,'single'),gaborMM,allSymbol,numOrient);
+		
         
+		scaling = double(size(J{end},1)) / double(size(J{iRes},1));
+		tmpMatchedSym = imresize(tmpMatchedSym,scaling,'nearest');
+		matchedSym = max( matchedSym, tmpMatchedSym );
+		
         if showPartBoundingBox
 		    margin = 2;
-		    xx = repmat((1:partSizeX),1,margin*2);
+			largerPartSizeX = floor(partSizeX * scaling+.5);
+			largerPartSizeY = floor(partSizeY * scaling+.5);
+		    xx = repmat((1:largerPartSizeX),1,margin*2);
 		    yy = [];
-		    for y = [1:margin partSizeY-margin+1:partSizeY]
-		        yy = [yy,ones(1,partSizeX)*y];
+		    for y = [1:margin largerPartSizeY-margin+1:largerPartSizeY]
+		        yy = [yy,ones(1,largerPartSizeX)*y];
 		    end
-		    yy = [yy,repmat((1:partSizeY),1,margin*2)];
+		    yy = [yy,repmat((1:largerPartSizeY),1,margin*2)];
 		    for x = [1:margin partSizeX-margin+1:partSizeX]
-		        xx = [xx,ones(1,partSizeY)*x];
+		        xx = [xx,ones(1,largerPartSizeY)*x];
 		    end
-		    inRow = single(xx-floor(partSizeX/2)); inCol = single(yy-floor(partSizeY/2));
+		    inRow = single(xx-floor(largerPartSizeX/2)); inCol = single(yy-floor(largerPartSizeY/2));
 		    tScale = 0; rScale = 1; cScale = 1; inO = zeros(numel(inRow),1,'single'); inS = zeros(numel(inRow),1,'single');
 		    actualPartRotation = iTransform-1;
 		    [outRow, outCol] = ...
@@ -117,7 +134,7 @@ for img = selected_img
 
 		    % directly overwrite the corresponding pixels
 		    for p = 1:length(outRow)
-		        x = floor(.5 + outRow(p) + activations(1,t)); y = floor(.5 + outCol(p) + activations(2,t));
+		        x = floor(.5 + outRow(p) + activations(2,t)*scaling); y = floor(.5 + outCol(p) + activations(3,t)*scaling);
 		        if x > 0 && x <= size(matchedBoundingBox,1) && y > 0 && y <= size(matchedBoundingBox,2)
 		            matchedBoundingBox(x,y,:) = [.5 .9 .6];
 		        end
@@ -125,11 +142,9 @@ for img = selected_img
 		end
     end
     
-	tmpMatchedSym = displayMatchedTemplate(size(J{1}),gaborXX,...
-    	gaborYY,gaborOO,zeros(length(gaborXX),1,'single'),gaborMM,allSymbol,numOrient);
-    
+	
     % overlay
-    matchedSym = repmat(-single(tmpMatchedSym),[1 1 3]);
+    matchedSym = repmat(-single(matchedSym),[1 1 3]);
     matchedSym = 1 * (matchedSym-min(matchedSym(:)))/(max(matchedSym(:))-min(matchedSym(:)));
     if showPartBoundingBox
 		for y = 1:size(matchedSym,2)

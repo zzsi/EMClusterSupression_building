@@ -8,17 +8,11 @@ for img = 1:numImage
         storeExponentialModelName = ['storedExponentialModel' num2str(s)];   
         load(storeExponentialModelName,'allFilter','halfFilterSize');
         %% Prepare spaces for variables
-        allSizex = zeros(1, numResolution); allSizey = zeros(1, numResolution);
-        trackMap = cell(numResolution, numOrient);
-        SUM2map = cell(1, numResolution);
-        
-        MAX2score = single(zeros(1, numResolution));  % maximum log-likelihood score at each resolution
-        Fx = zeros(1, numResolution); Fy = zeros(1, numResolution); % maximum likelihood location at each resolution
+        allSizex = zeros(1, numResolution); allSizey = zeros(1, numResolution);        
         %% Compute SUM1 maps
         % use non-inscribed images to compute SUM1 maps, to avoid boundary effects 
         disp(['start filtering image ' num2str(img) ' at Gabor length ' num2str(halfFilterSize*2+1) ' at all resolutions']); tic
         SUM1map = ApplyFilterfftSame(J, allFilter, localOrNot, localHalfx, localHalfy, doubleOrNot, thresholdFactor);  % filter testing image at all resolutions
-        
         
         disp(['filtering time: ' num2str(toc) ' seconds']);
         %{
@@ -41,16 +35,18 @@ for img = 1:numImage
         multipleResolutionImageName = ['working/multipleResolutionImage' num2str(img)]; 
         save(multipleResolutionImageName, 'J');
         %}
-
-        
         
         %% Compute MAX1 maps and track maps
         disp(['start maxing image ' num2str(img) ' at Gabor length ' num2str(halfFilterSize*2+1) ' at all resolutions']); tic
         subsampleM1 = 1;  % to be safe, please refrain from setting it to be larger than 1 
-		[MAX1map ARGMAX1map M1RowShift M1ColShift M1OriShifted] = ...
-			mexc_ComputeMAX1( numOrient, SUM1map, locationShiftLimit,... %single(locationShiftLimit)/(halfFilterSize*2+1),...
-            orientShiftLimit, subsampleM1 );
-        
+		MAX1map = cell(numResolution,numOrient);
+		ARGMAX1map = cell(numResolution,numOrient);
+		for iRes = 1:numResolution
+			[MAX1map(iRes,:) ARGMAX1map(iRes,:) M1RowShift M1ColShift M1OriShifted] = ...
+				mexc_ComputeMAX1( numOrient, SUM1map(iRes,:), locationShiftLimit,... 
+				orientShiftLimit, subsampleM1 );
+        end
+		
         %% sigmoid transformation (modified! was not here before)
         for ii = 1:numel(MAX1map)
             MAX1map{ii} = single( saturation*(2./(1.+exp(-2.*MAX1map{ii}/saturation))-1.) );

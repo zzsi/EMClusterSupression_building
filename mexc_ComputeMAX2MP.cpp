@@ -1,7 +1,11 @@
 /*
- * matching pursuit on SUM2 maps
+ * Matching pursuit on SUM2 maps of a single image (at multiple resolutions).
  *
- *    [activations] = mexc_ComputeMAX2MP( S2Map, templateRadius );
+ *    [activations] = mexc_ComputeMAX2MP( S2Map, templateRadius, S2Thres );
+ *
+ *  In matlab, S2Map is defined as:  SUM2map = cell(numTemplate,numResolution);
+ *  The S2 templates are assumed to have the same size. 
+ *	If the image has multiple resolutions, make sure it is arranged from low resolution to high resolution.
  */
  
 #include <stdio.h>
@@ -22,54 +26,81 @@ using namespace std;
  
 /* variable declaration */
 const float** S2Map;            /* SUM2 maps for multiple templates. All SUM2 maps are of the same size. */
-int height, width;              /* size of S2Map maps */
+int *height, *width;              /* sizes of S2Map maps */
 int supressionRadius;        /* radius of surround supression */
 int nTemplate;                      /* number of S2 templates */
+int nResolution;					/* number of image resolutions */
 vector<float> activations;			/* row, col, and iTemplate that corresponds to activated templates */
 int S2Thres; 					/* cut-off value for S2 score */
 
 void Compute()
 {
     int x, y;
-    float maxResponse, r;
+	float x2, y2;
+    float maxResponse, r, scaling;
     int bestX, bestY;
-    int jT;
-    int bestLocationshift, bestTemplate;
+    int iT, iR; /* index for template and reolution */
+    int bestLocationshift, bestTemplate, bestResolution;
 	int i, ind;
 	bool* explained;
 	bool found;
 	float* maxOverTemplates;
-	int* templateTrace;
+	int* templateTrace, *resolutionTrace;
 	
-	/* compute a single S2 map by maximizing over all S2 maps at corresponding pixels */
-	maxOverTemplates = (float*)mxCalloc( height*width, sizeof(float) );
-	templateTrace = (int*)mxCalloc( height*width, sizeof(int) );
-	jT = 0;
-	for (ind=0; ind<height*width; ++ind)
+	/* compute a single MAX2 map and ARGMAX map by maximizing over all S2 maps at corresponding pixels */
+	maxOverTemplates = (float*)mxCalloc( height[nResolution-1]*width[nResolution-1], sizeof(float) ); /* single the image is at multiple resolutions, use the finest (largest) resolution */
+	templateTrace = (int*)mxCalloc( height[nResolution-1]*width[nResolution-1], sizeof(int) );
+	resolutionTrace = (int*)mxCalloc( height[nResolution-1]*width[nResolution-1], sizeof(int) );
+	
+	ind = 0;
+	for (y=0; y<width[nResolution-1]; ++y)
 	{
-		maxOverTemplates[ind] = S2Map[jT][ind];
-		templateTrace[ind] = jT;
-	}
-	for( jT = 1; jT < nTemplate; ++jT )
-	{
-		for (ind=0; ind<height*width; ++ind)
+		for (x=0; x<height[nResolution-1]; ++x)
 		{
-			r = S2Map[jT][ind];
-			if( r > maxOverTemplates[ind] )
+			maxOverTemplates[ind] = NEGMAX;
+			templateTrace[ind] = -1;
+			resolutionTrace[ind] = -1;
+			++ind;
+		}
+	}
+	
+	i = 0; /* index for SUM2 map */
+	for (iR=0; iR<nResolution; ++iR)
+	{
+		scaling = (float)height[iR] / (float)height[nResolution-1]; /* scaling < 1 */
+		for (iT=0; iT<nTemplate; ++iT)
+		{
+			ind = 0; /* index for pixel inside the largest SUM2 map */
+			x2 = 0; y2 = 0;
+			for (y=0; y<width[nResolution-1]; ++y )
 			{
-				maxOverTemplates[ind] = r;
-				templateTrace[ind] = jT;
+				for (x=0; x<height[nResolution-1]; ++x )
+				{
+					r = S2Map[i][ (int)floor(x2)+(int)floor(y2)*height[iR] ];
+					if( r > maxOverTemplates[ind] )
+					{
+						maxOverTemplates[ind] = r;
+						templateTrace[ind] = iT;
+						resolutionTrace[ind] = iR;
+					}
+					ind++;
+					x2 += scaling;
+				}
+				y2 += scaling; /* (x2,y2): pixel location in the SUM2 map at resolution iR */
 			}
+			++i;
 		}
 	}
 	
 	activations.clear();
-	explained = (bool*)mxCalloc( height*width, sizeof(bool) );
-	for( i = 0; i < height * width; ++i )
+	explained = (bool*)mxCalloc( height[nResolution-1]*width[nResolution-1], sizeof(bool) );
+	for( i = 0; i < height[nResolution-1] * width[nResolution-1]; ++i )
 	{
 		explained[i] = false;
 	}
-	for( y = 0; y < width; ++y )
+	/* deal with boundary condition */
+	/*
+	for( y = 0; y < width; ++y ) 
 	{
 		for( x = 0; x < supressionRadius; ++x )
 		{
@@ -94,6 +125,7 @@ void Compute()
 			explained[x+y*height] = true;
 		}
 	}
+	*/
 	
 	found = true;
 	while ( found )
@@ -101,19 +133,22 @@ void Compute()
 		found = false;
 		/* find the global maximum of the SUM2 maps */
 		maxResponse = NEGMAX;
-		for (y=0; y<width; y++)
+		ind = 0;
+		for (y=0; y<width[nResolution-1]; y++)
 		{
-			for (x=0; x<height; x++)
+			for (x=0; x<height[nResolution-1]; x++)
 			{
-				ind = x+y*height;
 				r = maxOverTemplates[ind];
 				if (!(explained[ind]) && r>maxResponse )
 				{
+					bestResolution = resolutionTrace[ind];
+					scaling = (float)height[bestResolution] / (float)height[nResolution-1];
 					maxResponse = r;
-					bestX = x; bestY = y;
+					bestX = (int)floor(x*scaling+.5); bestY = (int)floor(x*scaling+.5); /* (bestX,bestY) is the location in the corresponding resolution */
 					bestTemplate = templateTrace[ind];
 					found = true;
-				}				
+				}
+				ind++;
 			}
 		}
 		if(!found || maxResponse < S2Thres)
@@ -121,18 +156,20 @@ void Compute()
 			break;
 		}
 		/* record it */
-		activations.push_back( bestX );
-		activations.push_back( bestY );
-		activations.push_back( bestTemplate );
+		activations.push_back( (float)bestX );
+		activations.push_back( (float)bestY );
+		activations.push_back( (float)bestResolution );
+		activations.push_back( (float)bestTemplate );
 		activations.push_back( maxResponse );
 		/* inhibition */
-		for( x = bestX-supressionRadius; x < bestX+supressionRadius; ++x )
+		scaling = (float)height[nResolution-1] / (float)height[bestResolution];
+		for( y = (int)floor(bestY-supressionRadius*scaling); y <  bestY+supressionRadius*scaling; ++y )
 		{
-			for( y = bestY-supressionRadius; y <  bestY+supressionRadius; ++y )
+			for( x = (int)floor(bestX-supressionRadius*scaling); x < bestX+supressionRadius*scaling; ++x )
 			{
-				if ((x>=0)&&(x<height)&&(y>=0)&&(y<width))
+				if ((x>=0)&&(x<height[nResolution-1])&&(y>=0)&&(y<width[nResolution-1]))
 				{
-					explained[x+y*height] = true;
+					explained[x+y*height[nResolution-1]] = true;
 				}
 			}
 		}
@@ -144,7 +181,7 @@ void Compute()
 void mexFunction(int nlhs, mxArray *plhs[], 
                  int nrhs, const mxArray *prhs[])                
 {
-    int ind, i, dataDim, bytes_to_copy;
+    int ind, i, j, dataDim, bytes_to_copy;
     const mxArray *f;
     const mxArray *pAS2Map;
     mxArray *outPA;
@@ -158,19 +195,25 @@ void mexFunction(int nlhs, mxArray *plhs[],
 	 * input variable 0: S2 maps
 	 */
     pAS2Map = prhs[0];
-    nTemplate = mxGetM(pAS2Map) * mxGetN(pAS2Map);
-    S2Map = (const float**)mxCalloc( nTemplate, sizeof(*S2Map) );   /* SUM1 maps */
-    for (i=0; i<nTemplate; ++i)
+    nTemplate = (int)mxGetM(pAS2Map);
+	nResolution = (int)mxGetN(pAS2Map);
+    S2Map = (const float**)mxCalloc( nTemplate*nResolution, sizeof(*S2Map) );   /* SUM2 maps */
+	ind = 0;
+	for (i=0; i < nResolution; ++i)
     {
-        f = mxGetCell(pAS2Map, i);
-        datatype = mxGetClassID(f);
-        if (datatype != mxSINGLE_CLASS)
-            mexErrMsgTxt("warning !! single precision required.");
-        S2Map[i] = (const float*)mxGetPr(f);    /* get the pointer to cell content */
-        height = mxGetM(f);    /* overwriting is ok, since it is constant, or we would only input one image */
-        width = mxGetN(f);
-    }
-    
+		for (j=0; j<nTemplate; ++j)
+		{
+			f = mxGetCell(pAS2Map, ind);
+			datatype = mxGetClassID(f);
+			if (datatype != mxSINGLE_CLASS)
+				mexErrMsgTxt("warning !! single precision required.");
+			S2Map[ind] = (const float*)mxGetPr(f);    /* get the pointer to cell content */
+			++ind;
+		}
+		height[i] = mxGetM(f);
+        width[i] = mxGetN(f);
+	}
+	
     /*
      * input variable 1: location shift radius
      */
@@ -191,7 +234,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
 	/*
 	 * output variable 0: activations
 	 */
-	dimsOutput[1] = (int)(activations.size()/4); dimsOutput[0] = 4;
+	dimsOutput[1] = (int)(activations.size()/5); dimsOutput[0] = 5;
     outPA = mxCreateNumericArray( 2, dimsOutput, mxSINGLE_CLASS, mxREAL );
     float* a = (float*)mxGetData(outPA);
 	for( int i = 0; i < (int)activations.size(); ++i )

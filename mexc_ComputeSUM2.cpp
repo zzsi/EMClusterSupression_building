@@ -186,10 +186,7 @@ void mexFunction(int nlhs, mxArray *plhs[],
      */
     subsampleS2 = (int)mxGetScalar(prhs[3]);
     
-  
-
     compute();
-    
     
     /* =============================================
      * Handle output variables.
